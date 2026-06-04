@@ -1,0 +1,23 @@
+# ── Core API ──────────────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+
+# ── TTS (Microsoft Edge, free, Indonesian support) ─────────────────────
+edge-tts>=6.1.9
+
+# ── RVC voice conversion ──────────────────────────────────────────────
+# Install PyTorch FIRST (before rvc-python), choosing the right variant:
+#
+#   CPU-only  (slower, works everywhere):
+#     pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+#
+#   CUDA 12.1 (recommended if you have an NVIDIA GPU):
+#     pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+#
+# Then install this requirements file:
+#   pip install -r requirements.txt
+rvc-python
+
+# ── Audio I/O ─────────────────────────────────────────────────────────
+numpy<2.0
+soundfile>=0.12.1
