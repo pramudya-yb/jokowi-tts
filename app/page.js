@@ -520,17 +520,6 @@ export default function JokowiTTS() {
 
         {/* ── Header ───────────────────────────────────────────────── */}
         <header className="header">
-          <div className="avatar-container">
-            <div className="avatar-ring" />
-            <img
-              src="/jokowi-avatar.png"
-              alt="Jokowi Avatar"
-              className="avatar-img"
-              width={100}
-              height={100}
-            />
-          </div>
-
           <h1>Jokowi <span className="accent">Voice</span> Generator</h1>
         </header>
 

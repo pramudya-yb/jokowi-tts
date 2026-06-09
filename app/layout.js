@@ -5,6 +5,9 @@ export const metadata = {
   description:
     "Generator suara Jokowi gratis. Ubah teks menjadi suara dengan gaya bicara khas Presiden Jokowi menggunakan teknologi Text-to-Speech.",
   keywords: "jokowi, text to speech, tts, indonesia, voice generator, suara jokowi",
+  icons: {
+    icon: '/jokowi-avatar.png',
+  },
 };
 
 export default function RootLayout({ children }) {
