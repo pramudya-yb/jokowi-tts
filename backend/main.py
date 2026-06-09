@@ -11,7 +11,7 @@ from pathlib import Path
 import tempfile
 
 import edge_tts
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -168,6 +168,60 @@ async def synthesize(
         raise HTTPException(500, str(exc)) from exc
 
 
+@app.post("/convert_audio")
+async def convert_audio(
+    file: UploadFile = File(...),
+    pitch_shift: int = Form(0),
+    index_rate: float = Form(0.75),
+    f0_method: str = Form("harvest"),
+    bg: BackgroundTasks = BackgroundTasks(),
+):
+    if pipeline is None:
+        raise HTTPException(503, "Model not loaded yet — try again in a moment")
+
+    job = uuid.uuid4().hex
+    in_ext = Path(file.filename).suffix if file.filename else ".wav"
+    in_audio = TEMP_DIR / f"{job}_in{in_ext}"
+    out_wav = TEMP_DIR / f"{job}_out.wav"
+
+    try:
+        content = await file.read()
+        in_audio.write_bytes(content)
+
+        if not in_audio.exists() or in_audio.stat().st_size == 0:
+            raise RuntimeError("Uploaded file is empty")
+
+        # ── Step 2: WAV → RVC Jokowi voice ──────────────────────────────
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            pipeline.convert,
+            str(in_audio),
+            str(out_wav),
+            pitch_shift,
+            index_rate,
+            f0_method,
+        )
+
+        if not out_wav.exists() or out_wav.stat().st_size == 0:
+            raise RuntimeError("RVC produced no output audio")
+
+        bg.add_task(_deferred_cleanup, in_audio, out_wav)
+
+        return FileResponse(
+            str(out_wav),
+            media_type="audio/wav",
+            filename="jokowi_speech_from_audio.wav",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    except Exception as exc:
+        for p in (in_audio, out_wav):
+            p.unlink(missing_ok=True)
+        logger.exception("Audio conversion failed")
+        raise HTTPException(500, str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -187,4 +241,4 @@ def _deferred_cleanup(*paths: Path, delay: int = 60) -> None:
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=False)

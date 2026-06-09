@@ -1,55 +1,82 @@
 @echo off
-setlocal EnableDelayedExpansion
 cd /d "%~dp0"
-title Jokowi TTS — Backend
+title Jokowi TTS Backend
 
 echo.
-echo  ==========================================
-echo   Jokowi TTS Backend  ^|  http://localhost:8000
-echo  ==========================================
+echo  ============================================
+echo   Jokowi TTS Backend - http://localhost:8000
+echo  ============================================
 echo.
 
-:: ── Check Python ────────────────────────────────────────────
+:: Check Python
 python --version >nul 2>&1
 if errorlevel 1 (
-  echo  [ERROR] Python not found. Install Python 3.10 or 3.11 from python.org
-  pause & exit /b 1
+    echo [ERROR] Python not found.
+    echo Install Python 3.10 or 3.11 from https://python.org
+    echo During install, check "Add Python to PATH"
+    echo.
+    pause
+    exit /b 1
 )
 
-:: ── Create virtual environment if missing ───────────────────
+python --version
+echo.
+
+:: Create virtual environment if missing
 if not exist ".venv" (
-  echo  [1/3] Creating virtual environment...
-  python -m venv .venv
-  if errorlevel 1 ( echo  [ERROR] Failed to create venv. & pause & exit /b 1 )
+    echo [1/3] Creating virtual environment...
+    python -m venv .venv
+    if errorlevel 1 (
+        echo [ERROR] Failed to create virtual environment.
+        pause
+        exit /b 1
+    )
+    echo Done.
+    echo.
 )
 
-:: ── Activate venv ───────────────────────────────────────────
+:: Activate venv
 call .venv\Scripts\activate.bat
-if errorlevel 1 ( echo  [ERROR] Failed to activate venv. & pause & exit /b 1 )
+if errorlevel 1 (
+    echo [ERROR] Failed to activate virtual environment.
+    pause
+    exit /b 1
+)
 
-:: ── Install / update dependencies ───────────────────────────
-echo  [2/3] Installing dependencies (first run may take a few minutes)...
+:: Install dependencies
+echo [2/3] Installing dependencies...
+echo First run downloads PyTorch (~200MB) - this may take several minutes.
 echo.
 
-:: CPU-only PyTorch (works on all Windows machines)
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --quiet
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu -q
+if errorlevel 1 (
+    echo [ERROR] Failed to install PyTorch.
+    echo Check your internet connection and try again.
+    pause
+    exit /b 1
+)
 
-:: If you have an NVIDIA GPU, comment the line above and uncomment this:
-:: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121 --quiet
+pip install -r requirements.txt -q
+if errorlevel 1 (
+    echo [ERROR] Failed to install requirements.
+    pause
+    exit /b 1
+)
 
-pip install -r requirements.txt --quiet
-if errorlevel 1 ( echo  [ERROR] pip install failed. Check your internet connection. & pause & exit /b 1 )
-
+echo Dependencies ready.
 echo.
-echo  [3/3] Starting server...
+
+:: Start server
+echo [3/3] Starting server...
 echo.
-echo  Open http://localhost:8000/docs for the interactive API docs.
-echo  Press Ctrl+C to stop the server.
+echo  API docs : http://localhost:8000/docs
+echo  Health   : http://localhost:8000/health
+echo.
+echo Press Ctrl+C to stop.
 echo.
 
-:: ── Start server ─────────────────────────────────────────────
 python main.py
 
 echo.
-echo  Server stopped.
+echo Server stopped.
 pause

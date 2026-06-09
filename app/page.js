@@ -42,6 +42,8 @@ function formatTime(sec) {
 export default function JokowiTTS() {
   // ── Playback state ─────────────────────────────────────────────────
   const [text, setText]             = useState("");
+  const [inputMode, setInputMode]   = useState("text");
+  const [audioFile, setAudioFile]   = useState(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isPaused, setIsPaused]     = useState(false);
   const [isLoading, setIsLoading]   = useState(false);
@@ -264,11 +266,15 @@ export default function JokowiTTS() {
     c.setLineDash([]);
   }, []);
 
-  // ── Core: Text → FastAPI → Audio ──────────────────────────────────
+  // ── Core: Text/Audio → FastAPI → Audio ──────────────────────────────────
   const speak = useCallback(async (textOverride) => {
     const textToSpeak = textOverride ?? text;
-    if (!textToSpeak.trim()) {
+    if (inputMode === "text" && !textToSpeak.trim()) {
       showToast("Silakan masukkan teks terlebih dahulu", "error");
+      return;
+    }
+    if (inputMode === "audio" && !audioFile) {
+      showToast("Silakan unggah file audio terlebih dahulu", "error");
       return;
     }
     if (!serverOnline) {
@@ -292,19 +298,34 @@ export default function JokowiTTS() {
     setAudioDuration(0);
 
     try {
-      const res = await fetch(`${API_URL}/synthesize`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: ctrl.signal,
-        body: JSON.stringify({
-          text: textToSpeak,
-          voice: selectedVoice,
-          pitch_shift: pitchShift,
-          index_rate: indexRate,
-          speed,
-          f0_method: f0Method,
-        }),
-      });
+      let res;
+      if (inputMode === "text") {
+        res = await fetch(`${API_URL}/synthesize`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: ctrl.signal,
+          body: JSON.stringify({
+            text: textToSpeak,
+            voice: selectedVoice,
+            pitch_shift: pitchShift,
+            index_rate: indexRate,
+            speed,
+            f0_method: f0Method,
+          }),
+        });
+      } else {
+        const formData = new FormData();
+        formData.append("file", audioFile);
+        formData.append("pitch_shift", pitchShift);
+        formData.append("index_rate", indexRate);
+        formData.append("f0_method", f0Method);
+
+        res = await fetch(`${API_URL}/convert_audio`, {
+          method: "POST",
+          signal: ctrl.signal,
+          body: formData,
+        });
+      }
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -317,10 +338,11 @@ export default function JokowiTTS() {
 
       setCurrentAudioUrl(audioUrl);
 
+      const entryText = inputMode === "text" ? textToSpeak : `Audio Upload: ${audioFile.name}`;
       const entry = {
         id:       Date.now(),
-        text:     textToSpeak.slice(0, 100),
-        fullText: textToSpeak,
+        text:     entryText.slice(0, 100),
+        fullText: entryText,
         audioUrl,
         time: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
       };
@@ -338,7 +360,7 @@ export default function JokowiTTS() {
       if (isMountedRef.current) setIsLoading(false);
     }
   }, [
-    text, selectedVoice, pitchShift, indexRate, speed, f0Method,
+    text, inputMode, audioFile, selectedVoice, pitchShift, indexRate, speed, f0Method,
     volume, serverOnline, showToast,
   ]);
 
@@ -411,6 +433,17 @@ export default function JokowiTTS() {
     setIndexRate(DEFAULT_SETTINGS.indexRate);
     showToast("Pengaturan direset ke default Jokowi");
   }, [showToast]);
+
+  const handleFileChange = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (file) setAudioFile(file);
+  }, []);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('audio/')) setAudioFile(file);
+  }, []);
 
   // ── Derived ────────────────────────────────────────────────────────
   const charCount  = text.length;
@@ -529,250 +562,291 @@ export default function JokowiTTS() {
           </div>
         )}
 
-        {/* ── Main card ─────────────────────────────────────────────── */}
-        <div className={`glass-card ${isSpeaking ? "active-card" : ""}`}>
-
-          {/* Text input */}
-          <div className="input-section">
-            <label className="input-label" htmlFor="tts-input">
-              <span className="icon">✍️</span>Masukkan Teks Pidato
-            </label>
-            <div className="textarea-wrapper">
-              <textarea
-                id="tts-input"
-                className="text-input"
-                value={text}
-                onChange={e => setText(e.target.value.slice(0, MAX_CHARS))}
-                placeholder='"Saudara-saudara sebangsa dan setanah air..."'
-                disabled={isBusy}
-              />
-              <span className={`char-counter ${charClass}`}>{charCount}/{MAX_CHARS}</span>
-            </div>
-          </div>
-
-          {/* Presets */}
-          <div className="presets-section">
-            <div className="presets-label"><span className="icon">💬</span>Kutipan Ikonik</div>
-            <div className="presets-grid">
-              {JOKOWI_PRESETS.map((p, i) => (
-                <button key={i} className="preset-btn" onClick={() => setText(p)} disabled={isBusy}>
-                  {p.length > 40 ? p.slice(0, 40) + "…" : p}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Voice + F0 method */}
-          <div className="controls-grid" style={{ marginBottom: 16 }}>
-            <div className="control-group" style={{ gridColumn: "1 / -1" }}>
-              <label className="control-label" htmlFor="voice-select">
-                <span>🎙️ Suara Edge TTS (sumber)</span>
-                <span className="info-tooltip">ℹ️
-                  <span className="tooltip-text">
-                    Suara asal sebelum dikonversi ke Jokowi.
-                    Ardi (pria) memberi hasil terbaik karena mendekati register suara Jokowi.
-                  </span>
-                </span>
-              </label>
-              <select id="voice-select" className="voice-select"
-                value={selectedVoice} onChange={e => setSelectedVoice(e.target.value)} disabled={isBusy}>
-                {edgeVoices.map(v => (
-                  <option key={v.ShortName} value={v.ShortName}>
-                    {v.FriendlyName ?? v.ShortName}
-                  </option>
-                ))}
-              </select>
+        {/* ── Main Layout ─────────────────────────────────────────────── */}
+        <div className="main-layout">
+          
+          {/* LEFT PANEL: Inputs & Controls */}
+          <div className={`glass-card ${isSpeaking ? "active-card" : ""}`}>
+            
+            <div className="tabs-container">
+              <button className={`tab-btn ${inputMode === "text" ? "active" : ""}`} onClick={() => setInputMode("text")}>📝 Teks Pidato</button>
+              <button className={`tab-btn ${inputMode === "audio" ? "active" : ""}`} onClick={() => setInputMode("audio")}>🎙️ Unggah Audio</button>
             </div>
 
-            <div className="control-group" style={{ gridColumn: "1 / -1" }}>
-              <label className="control-label" htmlFor="f0-select">
-                <span>🎵 Metode F0 (pitch tracking)</span>
-                <span className="info-tooltip">ℹ️
-                  <span className="tooltip-text">
-                    harvest = cepat, tanpa download.
-                    rmvpe = kualitas terbaik, unduh ~200 MB otomatis pertama kali.
-                  </span>
-                </span>
-              </label>
-              <select id="f0-select" className="voice-select"
-                value={f0Method} onChange={e => setF0Method(e.target.value)} disabled={isBusy}>
-                <option value="harvest">harvest — cepat (default)</option>
-                <option value="pm">pm — sangat cepat</option>
-                <option value="rmvpe">rmvpe — kualitas terbaik (auto-download ~200 MB)</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Parameter sliders */}
-          <div className="controls-grid">
-            <div className="control-group">
-              <label className="control-label" htmlFor="pitch-slider">
-                <span>🎼 Pitch Shift</span>
-                <span className="control-value">{pitchShift > 0 ? `+${pitchShift}` : pitchShift} st</span>
-              </label>
-              <input id="pitch-slider" type="range" className="slider"
-                min="-12" max="12" step="1" value={pitchShift}
-                onChange={e => setPitchShift(parseInt(e.target.value, 10))} disabled={isBusy} />
-            </div>
-
-            <div className="control-group">
-              <label className="control-label" htmlFor="speed-slider">
-                <span>⚡ Kecepatan</span>
-                <span className="control-value">{speed >= 0 ? `+${speed}` : speed}%</span>
-              </label>
-              <input id="speed-slider" type="range" className="slider"
-                min="-50" max="50" step="5" value={speed}
-                onChange={e => setSpeed(parseFloat(e.target.value))} disabled={isBusy} />
-            </div>
-
-            <div className="control-group">
-              <label className="control-label" htmlFor="index-slider">
-                <span>🔊 Index Rate</span>
-                <span className="info-tooltip">ℹ️
-                  <span className="tooltip-text">
-                    Seberapa kuat fitur suara Jokowi dari FAISS index diterapkan.
-                    0 = suara TTS asli, 1 = 100% Jokowi.
-                  </span>
-                </span>
-                <span className="control-value">{Math.round(indexRate * 100)}%</span>
-              </label>
-              <input id="index-slider" type="range" className="slider"
-                min="0" max="1" step="0.05" value={indexRate}
-                onChange={e => setIndexRate(parseFloat(e.target.value))} disabled={isBusy} />
-            </div>
-
-            <div className="control-group">
-              <label className="control-label" htmlFor="volume-slider">
-                <span>🔈 Volume</span>
-                <span className="control-value">{Math.round(volume * 100)}%</span>
-              </label>
-              <input id="volume-slider" type="range" className="slider"
-                min="0" max="1" step="0.05" value={volume}
-                onChange={e => setVolume(parseFloat(e.target.value))} />
-            </div>
-          </div>
-
-          {/* Action buttons */}
-          <div className="actions">
-            {!isSpeaking && !isLoading ? (
-              <button className="btn btn-primary" onClick={() => speak()}
-                disabled={!text.trim() || serverOnline !== true}>
-                <span className="icon">▶️</span>
-                {serverOnline === false ? "Server Offline" :
-                 serverOnline === null  ? "Memeriksa…"    : "Mulai Bicara"}
-              </button>
-            ) : isSpeaking ? (
+            {inputMode === "text" ? (
               <>
-                <button className="btn btn-secondary" onClick={togglePause}>
-                  <span className="icon">{isPaused ? "▶️" : "⏸️"}</span>
-                  {isPaused ? "Lanjutkan" : "Jeda"}
-                </button>
-                <button className="btn btn-stop" onClick={stopSpeaking}>
-                  <span className="icon">⏹️</span>Berhenti
-                </button>
+                {/* Text input */}
+                <div className="input-section">
+                  <label className="input-label" htmlFor="tts-input">
+                    <span className="icon">✍️</span>Masukkan Teks Pidato
+                  </label>
+                  <div className="textarea-wrapper">
+                    <textarea
+                      id="tts-input"
+                      className="text-input"
+                      value={text}
+                      onChange={e => setText(e.target.value.slice(0, MAX_CHARS))}
+                      placeholder='"Saudara-saudara sebangsa dan setanah air..."'
+                      disabled={isBusy}
+                    />
+                    <span className={`char-counter ${charClass}`}>{charCount}/{MAX_CHARS}</span>
+                  </div>
+                </div>
+
+                {/* Presets */}
+                <div className="presets-section">
+                  <div className="presets-label"><span className="icon">💬</span>Kutipan Ikonik</div>
+                  <div className="presets-grid">
+                    {JOKOWI_PRESETS.map((p, i) => (
+                      <button key={i} className="preset-btn" onClick={() => setText(p)} disabled={isBusy}>
+                        {p.length > 40 ? p.slice(0, 40) + "…" : p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </>
             ) : (
-              <button className="btn btn-primary" disabled>
-                <span className="btn-spinner" />
-                Memproses AI…
-              </button>
+              <div className="input-section">
+                <label className="input-label">
+                  <span className="icon">📁</span>Pilih File Audio
+                </label>
+                {audioFile ? (
+                  <div className="selected-file">
+                    <span className="selected-file-name">🎵 {audioFile.name}</span>
+                    <button className="selected-file-remove" onClick={() => setAudioFile(null)} title="Hapus File">×</button>
+                  </div>
+                ) : (
+                  <label 
+                    className="upload-area"
+                    onDrop={handleDrop}
+                    onDragOver={(e) => e.preventDefault()}
+                  >
+                    <div className="upload-icon">🎙️</div>
+                    <div className="upload-text">Klik untuk pilih file atau seret ke sini</div>
+                    <div className="upload-subtext">WAV, MP3, M4A, OGG (Max 10MB)</div>
+                    <input type="file" accept="audio/*" onChange={handleFileChange} style={{display: 'none'}} disabled={isBusy} />
+                  </label>
+                )}
+              </div>
             )}
 
-            {currentAudioUrl && !isLoading && (
-              <button className="btn btn-download"
-                onClick={() => downloadAudio(currentAudioUrl, text || "jokowi_speech")}
-                title="Unduh audio sebagai WAV">
-                <span>⬇️</span> Unduh WAV
-              </button>
-            )}
-
-            <button className="btn btn-secondary" onClick={resetSettings}
-              disabled={isBusy} title="Reset ke pengaturan default Jokowi">
-              <span className="icon">🔄</span>Reset
-            </button>
-
-            {(isLoading || isSpeaking) && (
-              <button className="btn btn-stop" onClick={stopSpeaking}>
-                <span className="icon">✕</span>Batalkan
-              </button>
-            )}
-          </div>
-
-          {/* ── Audio player — waveform + progress bar ────────────── */}
-          {currentAudioUrl && (
-            <div className="audio-player">
-              {/* Waveform canvas */}
-              <canvas ref={canvasRef} className="waveform-canvas" />
-
-              {/* Progress bar + time + download */}
-              <div className="audio-progress-row">
-                <span className="audio-time">{formatTime(audioCurrentTime)}</span>
-                <div className="audio-progress-bar" onClick={handleSeek}
-                  title="Klik untuk seek" role="slider"
-                  aria-valuenow={Math.round(audioProgress)}
-                  aria-valuemin={0} aria-valuemax={100}>
-                  <div className="audio-progress-fill" style={{ width: `${audioProgress}%` }} />
-                  <div className="audio-progress-thumb"
-                    style={{ left: `${audioProgress}%` }} />
+            {/* Voice + F0 method */}
+            <div className="controls-grid" style={{ marginBottom: 16 }}>
+              {inputMode === "text" && (
+                <div className="control-group" style={{ gridColumn: "1 / -1" }}>
+                  <label className="control-label" htmlFor="voice-select">
+                    <span>🎙️ Suara Edge TTS (sumber)</span>
+                    <span className="info-tooltip">ℹ️
+                      <span className="tooltip-text">
+                        Suara asal sebelum dikonversi ke Jokowi.
+                        Ardi (pria) memberi hasil terbaik karena mendekati register suara Jokowi.
+                      </span>
+                    </span>
+                  </label>
+                  <select id="voice-select" className="voice-select"
+                    value={selectedVoice} onChange={e => setSelectedVoice(e.target.value)} disabled={isBusy}>
+                    {edgeVoices.map(v => (
+                      <option key={v.ShortName} value={v.ShortName}>
+                        {v.FriendlyName ?? v.ShortName}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                <span className="audio-time">{formatTime(audioDuration)}</span>
+              )}
+
+              <div className="control-group" style={{ gridColumn: "1 / -1" }}>
+                <label className="control-label" htmlFor="f0-select">
+                  <span>🎵 Metode F0 (pitch tracking)</span>
+                  <span className="info-tooltip">ℹ️
+                    <span className="tooltip-text">
+                      harvest = cepat, tanpa download.
+                      rmvpe = kualitas terbaik, unduh ~200 MB otomatis pertama kali.
+                    </span>
+                  </span>
+                </label>
+                <select id="f0-select" className="voice-select"
+                  value={f0Method} onChange={e => setF0Method(e.target.value)} disabled={isBusy}>
+                  <option value="harvest">harvest — cepat (default)</option>
+                  <option value="pm">pm — sangat cepat</option>
+                  <option value="rmvpe">rmvpe — kualitas terbaik (auto-download ~200 MB)</option>
+                </select>
               </div>
             </div>
-          )}
 
-          {/* Loading wave (while synthesising, before audio is ready) */}
-          {isLoading && (
-            <div className="speaking-indicator">
-              <div className="wave-bars">
-                {[...Array(8)].map((_, i) => <div key={i} className="wave-bar" />)}
+            {/* Parameter sliders */}
+            <div className="controls-grid">
+              <div className="control-group">
+                <label className="control-label" htmlFor="pitch-slider">
+                  <span>🎼 Pitch Shift</span>
+                  <span className="control-value">{pitchShift > 0 ? `+${pitchShift}` : pitchShift} st</span>
+                </label>
+                <input id="pitch-slider" type="range" className="slider"
+                  min="-12" max="12" step="1" value={pitchShift}
+                  onChange={e => setPitchShift(parseInt(e.target.value, 10))} disabled={isBusy} />
               </div>
-              <span className="speaking-text">Mensintesis suara Jokowi…</span>
-            </div>
-          )}
 
-          {/* Status bar */}
-          <div className="status-bar">
-            <span className={`status-dot ${statusDotClass}`} />
-            <span>{statusLabel}</span>
-            <span style={{ marginLeft: "auto" }}>RVC v1 &bull; 175 Epoch</span>
+              {inputMode === "text" && (
+                <div className="control-group">
+                  <label className="control-label" htmlFor="speed-slider">
+                    <span>⚡ Kecepatan</span>
+                    <span className="control-value">{speed >= 0 ? `+${speed}` : speed}%</span>
+                  </label>
+                  <input id="speed-slider" type="range" className="slider"
+                    min="-50" max="50" step="5" value={speed}
+                    onChange={e => setSpeed(parseFloat(e.target.value))} disabled={isBusy} />
+                </div>
+              )}
+
+              <div className="control-group">
+                <label className="control-label" htmlFor="index-slider">
+                  <span>🔊 Index Rate</span>
+                  <span className="info-tooltip">ℹ️
+                    <span className="tooltip-text">
+                      Seberapa kuat fitur suara Jokowi dari FAISS index diterapkan.
+                      0 = suara TTS asli, 1 = 100% Jokowi.
+                    </span>
+                  </span>
+                  <span className="control-value">{Math.round(indexRate * 100)}%</span>
+                </label>
+                <input id="index-slider" type="range" className="slider"
+                  min="0" max="1" step="0.05" value={indexRate}
+                  onChange={e => setIndexRate(parseFloat(e.target.value))} disabled={isBusy} />
+              </div>
+
+              <div className="control-group">
+                <label className="control-label" htmlFor="volume-slider">
+                  <span>🔈 Volume</span>
+                  <span className="control-value">{Math.round(volume * 100)}%</span>
+                </label>
+                <input id="volume-slider" type="range" className="slider"
+                  min="0" max="1" step="0.05" value={volume}
+                  onChange={e => setVolume(parseFloat(e.target.value))} />
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="actions">
+              {!isSpeaking && !isLoading ? (
+                <button className="btn btn-primary" onClick={() => speak()}
+                  disabled={(inputMode === "text" && !text.trim()) || (inputMode === "audio" && !audioFile) || serverOnline !== true}>
+                  <span className="icon">▶️</span>
+                  {serverOnline === false ? "Server Offline" :
+                   serverOnline === null  ? "Memeriksa…"    : "Mulai Konversi"}
+                </button>
+              ) : isSpeaking ? (
+                <>
+                  <button className="btn btn-secondary" onClick={togglePause}>
+                    <span className="icon">{isPaused ? "▶️" : "⏸️"}</span>
+                    {isPaused ? "Lanjutkan" : "Jeda"}
+                  </button>
+                  <button className="btn btn-stop" onClick={stopSpeaking}>
+                    <span className="icon">⏹️</span>Berhenti
+                  </button>
+                </>
+              ) : (
+                <button className="btn btn-primary" disabled>
+                  <span className="btn-spinner" />
+                  Memproses AI…
+                </button>
+              )}
+
+              {currentAudioUrl && !isLoading && (
+                <button className="btn btn-download"
+                  onClick={() => downloadAudio(currentAudioUrl, text || "jokowi_speech")}
+                  title="Unduh audio sebagai WAV">
+                  <span>⬇️</span> Unduh WAV
+                </button>
+              )}
+
+              <button className="btn btn-secondary" onClick={resetSettings}
+                disabled={isBusy} title="Reset ke pengaturan default Jokowi">
+                <span className="icon">🔄</span>Reset
+              </button>
+
+              {(isLoading || isSpeaking) && (
+                <button className="btn btn-stop" onClick={stopSpeaking}>
+                  <span className="icon">✕</span>Batalkan
+                </button>
+              )}
+            </div>
+
+            {/* Status bar */}
+            <div className="status-bar">
+              <span className={`status-dot ${statusDotClass}`} />
+              <span>{statusLabel}</span>
+              <span style={{ marginLeft: "auto" }}>RVC v1 &bull; 175 Epoch</span>
+            </div>
+          </div>
+          
+          {/* RIGHT PANEL: Media & History */}
+          <div className="right-panel" style={{display: "flex", flexDirection: "column", gap: "20px"}}>
+            
+            {/* Loading wave (while synthesising, before audio is ready) */}
+            {isLoading && (
+              <div className="glass-card speaking-indicator" style={{margin: 0}}>
+                <div className="wave-bars">
+                  {[...Array(8)].map((_, i) => <div key={i} className="wave-bar" />)}
+                </div>
+                <span className="speaking-text">Mensintesis suara Jokowi…</span>
+              </div>
+            )}
+
+            {/* Audio player — waveform + progress bar */}
+            {currentAudioUrl && (
+              <div className="audio-player" style={{margin: 0}}>
+                <canvas ref={canvasRef} className="waveform-canvas" />
+                <div className="audio-progress-row">
+                  <span className="audio-time">{formatTime(audioCurrentTime)}</span>
+                  <div className="audio-progress-bar" onClick={handleSeek}
+                    title="Klik untuk seek" role="slider"
+                    aria-valuenow={Math.round(audioProgress)}
+                    aria-valuemin={0} aria-valuemax={100}>
+                    <div className="audio-progress-fill" style={{ width: `${audioProgress}%` }} />
+                    <div className="audio-progress-thumb"
+                      style={{ left: `${audioProgress}%` }} />
+                  </div>
+                  <span className="audio-time">{formatTime(audioDuration)}</span>
+                </div>
+              </div>
+            )}
+
+            {/* ── History ───────────────────────────────────────────────── */}
+            {history.length > 0 && (
+              <div className="glass-card history-section" style={{margin: 0}}>
+                <div className="history-header">
+                  <div className="history-title"><span>📜</span> Riwayat</div>
+                  <button className="history-clear" onClick={clearHistory}>Hapus Semua</button>
+                </div>
+                <div className="history-list">
+                  {history.map(entry => (
+                    <div key={entry.id} className="history-item"
+                      onClick={() => handleHistoryPlay(entry)}
+                      role="button" tabIndex={0}
+                      onKeyDown={e => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          handleHistoryPlay(entry);
+                        }
+                      }}>
+                      <div className="play-icon">▶</div>
+                      <span className="history-text">{entry.text}</span>
+                      <span className="history-time">{entry.time}</span>
+                      {entry.audioUrl && (
+                        <button
+                          className="history-dl-btn"
+                          title="Unduh audio ini"
+                          onClick={e => { e.stopPropagation(); downloadAudio(entry.audioUrl, entry.text); }}
+                        >
+                          ⬇️
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
-
-        {/* ── History ───────────────────────────────────────────────── */}
-        {history.length > 0 && (
-          <div className="glass-card history-section">
-            <div className="history-header">
-              <div className="history-title"><span>📜</span> Riwayat</div>
-              <button className="history-clear" onClick={clearHistory}>Hapus Semua</button>
-            </div>
-            <div className="history-list">
-              {history.map(entry => (
-                <div key={entry.id} className="history-item"
-                  onClick={() => handleHistoryPlay(entry)}
-                  role="button" tabIndex={0}
-                  onKeyDown={e => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      handleHistoryPlay(entry);
-                    }
-                  }}>
-                  <div className="play-icon">▶</div>
-                  <span className="history-text">{entry.text}</span>
-                  <span className="history-time">{entry.time}</span>
-                  {entry.audioUrl && (
-                    <button
-                      className="history-dl-btn"
-                      title="Unduh audio ini"
-                      onClick={e => { e.stopPropagation(); downloadAudio(entry.audioUrl, entry.text); }}
-                    >
-                      ⬇️
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* ── Footer ────────────────────────────────────────────────── */}
         <footer className="footer">
