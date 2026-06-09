@@ -17,7 +17,7 @@ edge-tts>=6.1.9
 #
 # Then install this requirements file:
 #   pip install -r requirements.txt
-rvc-python
+infer_rvc_python
 
 # ── Audio I/O ─────────────────────────────────────────────────────────
 numpy<2.0
