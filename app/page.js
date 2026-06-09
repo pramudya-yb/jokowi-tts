@@ -537,17 +537,6 @@ export default function JokowiTTS() {
           </div>
 
           <h1>Jokowi <span className="accent">Voice</span> Generator</h1>
-          <p>
-            Menggunakan model RVC terlatih 175 epoch dengan suara asli Pak Jokowi.
-            Jauh lebih realistis dari Text-to-Speech biasa.
-          </p>
-
-          <div className="features">
-            <span className="feature-chip"><span className="chip-icon">🤖</span> RVC AI Model</span>
-            <span className="feature-chip"><span className="chip-icon">🎙️</span> Suara Asli</span>
-            <span className="feature-chip"><span className="chip-icon">⬇️</span> Bisa Diunduh</span>
-            <span className="feature-chip"><span className="chip-icon">🇮🇩</span> Bahasa Indonesia</span>
-          </div>
         </header>
 
         {/* ── Server offline banner ─────────────────────────────────── */}
@@ -596,12 +585,22 @@ export default function JokowiTTS() {
                 {/* Presets */}
                 <div className="presets-section">
                   <div className="presets-label"><span className="icon">💬</span>Kutipan Ikonik</div>
-                  <div className="presets-grid">
-                    {JOKOWI_PRESETS.map((p, i) => (
-                      <button key={i} className="preset-btn" onClick={() => setText(p)} disabled={isBusy}>
-                        {p.length > 40 ? p.slice(0, 40) + "…" : p}
-                      </button>
-                    ))}
+                  <div className="voice-select-wrapper">
+                    <select 
+                      className="voice-select" 
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          setText(e.target.value);
+                          e.target.value = "";
+                        }
+                      }}
+                      disabled={isBusy}
+                    >
+                      <option value="">-- Pilih Kutipan --</option>
+                      {JOKOWI_PRESETS.map((p, i) => (
+                        <option key={i} value={p}>{p.length > 50 ? p.substring(0, 50) + "..." : p}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </>
