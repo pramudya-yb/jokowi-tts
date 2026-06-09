@@ -520,11 +520,6 @@ export default function JokowiTTS() {
 
         {/* ── Header ───────────────────────────────────────────────── */}
         <header className="header">
-          <div className="header-badge">
-            <span className="dot" />
-            RVC AI &bull; Suara Asli Jokowi
-          </div>
-
           <div className="avatar-container">
             <div className="avatar-ring" />
             <img
